@@ -40,10 +40,10 @@ GTNH 大型元素复制机（Elemental Duplicator）多机智能调度系统，O
 ## 硬件要求
 
 - T3 屏幕（160×50）+ T3 显卡 + OC 适配器
-- 适配器连接**数据球仓**（不是复制机控制器！）——电路配置组件在球仓上
+- 适配器放置在**数据球仓**（不是复制机控制器！）
 - ME 网络：一个 me_controller / me_interface 供 OC 查询库存（方块和贴线缆的 part 形态都能被适配器读到）
 - 请求器（AE2FC Level Maintainer）任意数量
-- （可选）**物品栏控制器（Inventory Controller）升级**：每个球仓一个贴仓适配器 + 该升级，
+- （可选）**物品栏控制器（Inventory Controller）升级**：每个球仓一个正上方贴适配器 + 该升级，不需要额外的mfu绑定
   启用球仓自动扫描（各机可产元素识别、按实际球位选电路）。不装也能用，回落约定模式。
 
 ## 安装
@@ -89,42 +89,6 @@ GTNH 大型元素复制机（Elemental Duplicator）多机智能调度系统，O
 | `orbScan.probeCircuit` | 16 | 主动配对探测写入的电路号（写完即还原，仅空闲机） |
 | `orbScan.maxSlot` | 16 | 球仓数据球槽位扫描上限 |
 | `orbElements` | `{}` | 元素符号手动绑定（label 子串），自动学习失败的兜底 |
-
-## 兼容性说明（源码级审计 + 实机验证结论）
-
-| 依赖 | 290beta1 | daily 690+ | ERE 策略 |
-|---|---|---|---|
-| 电路驱动 (Computronics gt_machine) | 1.9.8 ✓ | ✓ | 电路对 `get/setCircuitConfiguration` 为必要条件；`getName()` 含 "orb" 首选判定；无 getName 退回方法数≤2 |
-| 请求器 level_maintainer | AE2FC 1.5.88 ✓ | ✓ | getSlot 特征方法、三参 setSlot |
-| 流体库存查询 | me_controller/me_interface ✓ | ✓（fluid_interface 也可） | 统一走 me_* |
-| **OC 组件方法表示** | function | **可调用表**（OC 1.8+，type=="table" 且元表带 __call） | 方法存在性一律用「function 或可调用表」判定，两种都认 |
-| 渲染器铺底 | 空格可画背景 | 空格不画背景、█按前景色 | 统一 █ 铺底（双版兼容） |
-
-> ⚠️ **OC 1.8+ 大坑**：新版 OC 把代理组件的方法暴露为「可调用表」而非 function，
-> 用 `type(p.getSlot) == "function"` 判方法存在会在新版上全军覆没（发现不到任何硬件）。
-> 本项目的判定辅助函数同时接受两种表示。
-
-## 状态持久化
-
-权重/停用/固定电路存 `/home/ere/ERE_STATE.lua`（运行时生成，勿提交），重启自动恢复。
-
-## 诊断
-
-游戏内运行 `/home/ere/diagnose.lua`：一次性列出 OC 网络全部组件、目标组件计数、
-gt_machine 方法明细（找数据球仓），只读不改状态。
-
-## 测试
-
-宿主机（需 Python + lupa）：
-
-```bash
-pip install lupa
-python tests/run_tests.py
-```
-
-lupa 模拟 OC 环境，16 项单测覆盖 util/uum/compat/discovery/model/scheduler
-（分配、独占保护、保口粮、固定模式、阈值、持久化）。
-Windows 宿主机注意：「model 持久化」用例写 `/tmp/`，需自建 `C:\tmp` 目录否则该例失败（其余不受影响）。
 
 ## 文件结构
 
