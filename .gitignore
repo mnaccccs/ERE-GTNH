@@ -1,0 +1,5 @@
+# 运行时状态与本地依赖，勿提交
+home/ere/ERE_STATE.lua
+tests/.pydeps/
+.venv*/
+__pycache__/
