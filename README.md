@@ -35,18 +35,6 @@ GTNH 大型元素复制机（Elemental Duplicator）多机智能调度系统，O
 - ME 网络：一个 me_controller / me_interface 供 OC 查询库存（方块和贴线缆的 part 形态都能被适配器读到）
 - 请求器（AE2FC Level Maintainer）任意数量
 
-### 无法把适配器贴到球仓上？用 MFU（远程适配器）
-
-OC 适配器只能暴露**贴着的**方块，而数据球仓往往藏在机器结构里贴不到。解决方案是 **MFU**（T3 适配器升级卡，物品名就叫 MFU，设备信息 "Remote Adapter"）：
-
-1. 手持 MFU **右键点目标方块**（数据球仓/请求器/ME 接口），MFU 即绑定该方块坐标+面（工具提示显示 Linked）
-2. 把绑好的 MFU 塞进任意**适配器的升级槽**（每台适配器只能放 1 个 MFU）
-3. 适配器照常接入 OC 网络
-
-限制（源码核实，OC 1.12.x）：默认作用距离 **16 格**（`misc.mfuRange`，可 0-128 调）、必须同维度、目标区块必须已加载。
-
-对 ERE 完全透明：MFU 走全局驱动注册表代理组件，`component.list` 里看到的就是同样的 `gt_machine` / `level_maintainer` / `me_controller`——发现逻辑、地址前缀消歧、球仓识别全部照常工作，无需任何代码改动。多台球仓就多组「适配器+MFU」，全挂同一线缆网络即可。
-
 ## 安装
 
 ```
