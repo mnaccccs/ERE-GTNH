@@ -64,6 +64,16 @@ config.compat = {
   blockFill = true,  -- true: fillBg 用 █+前景色（daily690/新版渲染器）
 }
 
+-- ==================== 球仓扫描（物品栏控制器）====================
+config.orbScan = {
+  enabled = true,    -- 自动扫描数据球仓内容（需给球仓贴 inventory_controller 适配器）
+  probeCircuit = 16, -- 主动配对探测写入的电路号（写完立即还原；仅空闲机使用）
+  maxSlot = 16,      -- 球仓数据球槽位扫描上限（槽17是编程电路）
+}
+-- 元素符号手动绑定（自动学习失败时的兜底）：符号 → 目标槽 label 子串
+-- 例：orbElements = { Tn = "三钛", Fl = "镄" }
+config.orbElements = {}
+
 -- ==================== 日志 ====================
 config.logCap = 300               -- 日志环形缓冲容量
 config.startupBanner = "安装19个能源仓的复制机最优并行为40并"

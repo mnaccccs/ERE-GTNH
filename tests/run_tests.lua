@@ -301,6 +301,85 @@ T("scheduler 同名粉独占保护（gt.metaitem.01 撞车回归）", function()
   end
 end)
 
+T("nbt 解析真实数据球 tag", function()
+  local nbt = require("nbt")
+  -- 实机抓取：数据球（mDataName=Og）的 gzip 压缩 NBT（65 字节）
+  local bytes = { 31, 139, 8, 0, 0, 0, 0, 0, 0, 255, 227, 98, 96, 224, 96, 224,
+    204, 117, 73, 44, 73, 244, 75, 204, 77, 101, 96, 242, 79, 231, 96, 224,
+    2, 243, 67, 50, 75, 114, 82, 25, 248, 92, 115, 82, 115, 83, 243, 74, 18,
+    115, 116, 131, 147, 19, 243, 24, 0, 225, 150, 232, 59, 49, 0, 0, 0 }
+  local chars = {}
+  for i, b in ipairs(bytes) do chars[i] = string.char(b) end
+  local data = nbt.fromGzip(table.concat(chars))
+  assert(data.mDataName == "Og", "mDataName=" .. tostring(data.mDataName))
+  assert(data.mDataTitle == "Elemental-Scan", "mDataTitle=" .. tostring(data.mDataTitle))
+end)
+
+T("model 球仓绑定与能力表", function()
+  local config = require("config")
+  local util = require("util")
+  local modelM = require("model")
+  local mdl = modelM.new(config, util.newLog(50))
+  -- 目标槽：1=锇 2=三钛 3=镅
+  for i, lab in ipairs({ "锇粉", "三钛粉", "镅粉" }) do
+    mdl.slots["m:" .. i] = { id = "m:" .. i, maintainerAddr = "m", slot = i,
+      name = "gregtech:gt.metaitem.01", damage = 2000 + i, label = lab,
+      quantity = 100, weight = 3, disabled = false }
+  end
+  -- 机器A 按约定布局；机器B 三钛/镅位置互换（非约定布局）
+  local layouts = {
+    orbA = { [1] = "Os", [2] = "Tn", [3] = "Am" },
+    orbB = { [1] = "Os", [2] = "Am", [3] = "Tn" },
+  }
+  -- 位置 2、3 冲突（A/B 不一致）→ 只有位置 1 可学
+  local bindings = mdl:learnOrbBindings(layouts)
+  assert(bindings["Os"] and bindings["Os"].id == "m:1", "Os 应绑到槽1")
+  assert(bindings["Tn"] == nil, "Tn 位置冲突不应绑定")
+  -- 手动绑定兜底
+  config.orbElements = { Tn = "三钛", Am = "镅" }
+  bindings = mdl:learnOrbBindings(layouts)
+  assert(bindings["Tn"] and bindings["Tn"].id == "m:2", "手动绑定 Tn 应命中槽2")
+  assert(bindings["Am"] and bindings["Am"].id == "m:3", "手动绑定 Am 应命中槽3")
+  -- 能力表：按各机实际槽位
+  assert(mdl.caps.orbA["m:2"] == 2, "A 机三钛电路=2")
+  assert(mdl.caps.orbB["m:2"] == 3, "B 机三钛电路=3（非约定布局）, got " .. tostring(mdl.caps.orbB["m:2"]))
+  config.orbElements = {}
+end)
+
+T("scheduler 球仓能力过滤与按机选电路", function()
+  local config = require("config")
+  local util = require("util")
+  local modelM = require("model")
+  local schedM = require("scheduler")
+  local log = util.newLog(50)
+  local mdl = modelM.new(config, log)
+  local sched = schedM.new(config, mdl, log)
+  local circuits = {}
+  sched.discovery = {
+    readCircuit = function(p) return circuits[p.address] or -1 end,
+    writeCircuit = function(p, c) circuits[p.address] = c return true end,
+  }
+  mdl:setMachines({ { address = "orb1" }, { address = "orb2" } })
+  -- 两个同名粉目标槽，cur=0 全缺
+  mdl.slots["m:1"] = { id = "m:1", maintainerAddr = "m", slot = 1,
+    name = "gregtech:gt.metaitem.01", damage = 2083, label = "锇粉",
+    quantity = 1000, weight = 3, disabled = false, cur = 0 }
+  mdl.slots["m:2"] = { id = "m:2", maintainerAddr = "m", slot = 2,
+    name = "gregtech:gt.metaitem.01", damage = 2329, label = "三钛粉",
+    quantity = 1000, weight = 3, disabled = false, cur = 0 }
+  -- 能力：orb1 两种都会（约定槽位）；orb2 只会三钛、且球在槽5（非约定布局）
+  mdl.caps = {
+    orb1 = { ["m:1"] = 1, ["m:2"] = 2 },
+    orb2 = { ["m:2"] = 5 },
+  }
+  sched:tick(1000, nil, nil)
+  local m1 = mdl.machines["orb1"]
+  local m2 = mdl.machines["orb2"]
+  assert(m1.targetSlot == "m:1", "orb1 应认领锇粉（orb2 不会锇）, got " .. tostring(m1.targetSlot))
+  assert(m2.targetSlot == "m:2", "orb2 只能认领三钛粉, got " .. tostring(m2.targetSlot))
+  assert(circuits["orb2"] == 5, "orb2 电路应取球实际槽位 5, got " .. tostring(circuits["orb2"]))
+end)
+
 T("scheduler UUM 保口粮", function()
   local config = require("config")
   local util = require("util")

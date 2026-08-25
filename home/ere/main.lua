@@ -21,6 +21,7 @@ local config = require("config")
 local util = require("util")
 local compat = require("compat")
 local discovery = require("discovery")
+local nbtM = require("nbt")
 local uumM = require("uum")
 local modelM = require("model")
 local schedulerM = require("scheduler")
@@ -57,6 +58,99 @@ local app = {
 
 -- ==================== 组件发现 ====================
 
+--- 球仓扫描：配对 invc ↔ 球仓 → 读数据球布局 → 学习元素绑定/能力表
+--- invc 与球仓 gt_machine 无直接关联 API：空闲机用「写探测电路看哪个库存跟着变」
+--- 主动配对，在产机用当前电路值被动比对，几轮内全部配上。
+local invPair = {}  -- orbAddr -> invcAddr（地址稳定，内存保存即可）
+local function scanOrbs()
+  if not config.orbScan.enabled then return end
+  local invs = discovery.scanInvControllers()
+  if #invs == 0 then
+    if mdl.caps then mdl:clearOrbScan() end
+    return
+  end
+  local invByAddr = {}
+  for _, inv in ipairs(invs) do invByAddr[inv.addr] = inv end
+
+  -- 1) 配对
+  for _, m in ipairs(mdl:machineList()) do
+    if invPair[m.addr] and not invByAddr[invPair[m.addr]] then
+      invPair[m.addr] = nil  -- invc 被拔了
+    end
+    if not invPair[m.addr] then
+      local free = {}
+      for _, inv in ipairs(invs) do
+        local used = false
+        for _, a in pairs(invPair) do if a == inv.addr then used = true break end end
+        if not used then free[#free + 1] = inv end
+      end
+      local paired = discovery.pairPassive(m.proxy, free)
+      if not paired then
+        -- 空闲机主动探测（写探测电路立即还原；在产机跳过等下轮）
+        local cur = discovery.readCircuit(m.proxy)
+        if cur ~= nil and (cur < 0 or not m.targetSlot) then
+          local addr = discovery.pairByProbe(m.proxy, free, config.orbScan.probeCircuit)
+          paired = addr
+        end
+      end
+      if paired then
+        invPair[m.addr] = paired
+        log:add(string.format("[球仓] %s ↔ invc %s 配对", m.addr:sub(1, 4), paired:sub(1, 4)))
+      end
+    end
+  end
+
+  -- 2) 读布局（仅已配对的机器）
+  local layouts = {}
+  for addr, invAddr in pairs(invPair) do
+    local inv = invByAddr[invAddr]
+    if inv then
+      local orbs = discovery.readOrbLayout(inv, nbtM, config.orbScan.maxSlot)
+      layouts[addr] = orbs
+    end
+  end
+  if next(layouts) ~= nil then mdl._orbLayouts = layouts end
+
+  -- 3) 学习绑定 + 能力表（需要目标槽数据；首拍槽未刷新时留给 tick 补做）
+  if next(layouts) ~= nil and next(mdl.slots) ~= nil then
+    local bindings = mdl:learnOrbBindings(layouts)
+    -- 汇总日志（内容变化才记）
+    local syms = {}
+    for sym in pairs(bindings) do syms[#syms + 1] = sym end
+    table.sort(syms)
+    local line = table.concat(syms, " ")
+    -- 未识别符号（球存在但没绑到任何目标槽）
+    local unknown = {}
+    for _, layout in pairs(layouts) do
+      for _, sym in pairs(layout) do
+        if not bindings[sym] then unknown[sym] = true end
+      end
+    end
+    local uList = {}
+    for sym in pairs(unknown) do uList[#uList + 1] = sym end
+    table.sort(uList)
+    local uLine = table.concat(uList, " ")
+    local sig = line .. "|" .. uLine
+    if sig ~= app.lastOrbSig then
+      app.lastOrbSig = sig
+      log:add("[球仓] 已识别元素: " .. (line ~= "" and line or "（无）"))
+      if uLine ~= "" then
+        log:add("[球仓] 未识别符号 " .. uLine .. "（无对应请求器槽；可在 config.orbElements 手动绑定）")
+      end
+      for _, m in ipairs(mdl:machineList()) do
+        local caps = mdl.caps and mdl.caps[m.addr]
+        if caps then
+          local n, total = 0, #syms
+          for _ in pairs(caps) do n = n + 1 end
+          if n < total then
+            log:add(string.format("[球仓] %s 可产 %d/%d 元素（有目标没有球）", m.addr:sub(1, 4), n, total))
+          end
+        end
+      end
+    end
+  end
+end
+
 local function doDiscover()
   local res = discovery.scan(config.addresses)
   local nM = #res.maintainers
@@ -85,6 +179,7 @@ local function doDiscover()
 
   if nM == 0 then log:add("[错误] 未发现请求器（level_maintainer）——检查 AE2FC 与 OC 适配器") end
   if nO == 0 then log:add("[错误] 未发现数据球仓（gt_machine 电路组件）——适配器需贴在球仓上") end
+  scanOrbs()
   return nM, nO
 end
 
@@ -98,6 +193,11 @@ local function tick()
   -- 库存刷新（ME 断线时跳过，保留上次值）
   if app.me then
     mdl:refreshSlots(5)
+    -- 球仓绑定学习若因槽数据未就绪被推迟，这里补做
+    if mdl._orbLayouts and not mdl.caps then
+      mdl:learnOrbBindings(mdl._orbLayouts)
+    end
+    app.caps = mdl.caps
     -- UUM 停配阈值：请求器「UU物质液滴」槽的数量优先，缺省回落配置默认
     local effTh = mdl.uumThreshold or config.uum.warnThreshold
     uum.threshold = effTh

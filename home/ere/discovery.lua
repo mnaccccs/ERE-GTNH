@@ -122,4 +122,94 @@ function discovery.writeCircuit(orb, circuit)
   return nil, "写入被拒绝"
 end
 
+-- ==================== 球仓内容扫描（inventory_controller）====================
+
+--- 发现全部 inventory_controller 及其读到的 GT 机器库存面
+--- 返回 { { addr, proxy, side, size }... }（每台 invc 取第一个 size>1 的库存面）
+function discovery.scanInvControllers()
+  local out = {}
+  for addr, _ in component.list("inventory_controller") do
+    local ok, p = pcall(component.proxy, addr)
+    if ok and p then
+      for side = 0, 5 do
+        local oks, sz = pcall(p.getInventorySize, side)
+        if oks and type(sz) == "number" and sz > 1 then
+          out[#out + 1] = { addr = addr, proxy = p, side = side, size = sz }
+          break
+        end
+      end
+    end
+  end
+  return out
+end
+
+--- 读一个库存面的数据球布局。
+--- 返回 orbs（{[槽位]=元素符号}）、circuitDmg（编程电路号，无电路=nil）
+--- @param inv table  scanInvControllers 的条目
+--- @param nbt table  nbt 模块（解析球 NBT 取 mDataName）
+--- @param maxSlot number  球槽扫描上限（电路槽在其后）
+function discovery.readOrbLayout(inv, nbt, maxSlot)
+  local orbs = {}
+  local circuitDmg = nil
+  for slot = 1, inv.size do
+    local ok, it = pcall(inv.proxy.getStackInSlot, inv.side, slot)
+    if ok and it then
+      if it.name == "gregtech:gt.metaitem.01" and it.damage == 32707 and it.hasTag and it.tag then
+        -- 数据球：NBT 的 mDataName = 元素符号
+        if slot <= (maxSlot or 16) then
+          local okn, data = pcall(nbt.fromGzip, it.tag)
+          if okn and type(data) == "table" and type(data.mDataName) == "string" then
+            orbs[slot] = data.mDataName
+          end
+        end
+      elseif it.name == "gregtech:gt.integrated_circuit" then
+        circuitDmg = it.damage
+      end
+    end
+  end
+  return orbs, circuitDmg
+end
+
+--- 主动配对：给空闲球仓写一次探测电路，看哪个库存的电路槽跟着变，随后还原。
+--- invc 与球仓 gt_machine 没有直接关联 API，这是最可靠的配对手段。
+--- @param orb proxy  球仓 gt_machine 代理
+--- @param invs table  scanInvControllers 结果
+--- @param probeCircuit number  探测电路号（应与众机当前值不同，如 16）
+--- @return string|nil invAddr, string|nil err
+function discovery.pairByProbe(orb, invs, probeCircuit)
+  local cur = discovery.readCircuit(orb)
+  if cur == nil then return nil, "球仓离线" end
+  -- 写入探测值
+  local ok, werr = discovery.writeCircuit(orb, probeCircuit)
+  if not ok then return nil, "探测电路写入失败: " .. tostring(werr) end
+  local found, foundN = nil, 0
+  for _, inv in ipairs(invs) do
+    local _, dmg = discovery.readOrbLayout(inv, nil, 0)  -- nbt=nil 不解析球，只看电路槽
+    if dmg == probeCircuit then
+      found, foundN = inv.addr, foundN + 1
+    end
+  end
+  -- 还原
+  discovery.writeCircuit(orb, cur)
+  if foundN == 1 then return found end
+  if foundN == 0 then return nil, "无库存同步（该球仓无 invc 贴着）" end
+  return nil, "多个库存同步（探测值撞车）"
+end
+
+--- 被动配对：比较球仓当前电路与各库存电路槽，唯一匹配即配对（不打扰生产）
+--- @return string|nil invAddr
+function discovery.pairPassive(orb, invs)
+  local cur = discovery.readCircuit(orb)
+  if cur == nil or cur < 0 then return nil end  -- 无电路时电路槽为空，无法比对
+  local found, foundN = nil, 0
+  for _, inv in ipairs(invs) do
+    local _, dmg = discovery.readOrbLayout(inv, nil, 0)
+    if dmg == cur then
+      found, foundN = inv.addr, foundN + 1
+    end
+  end
+  if foundN == 1 then return found end
+  return nil
+end
+
 return discovery

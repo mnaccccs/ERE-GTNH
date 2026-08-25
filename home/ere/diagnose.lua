@@ -91,6 +91,38 @@ print("-- 5. 连接方式检查 --")
 print("  适配器组件数: " .. countType("adapter"))
 local nCable = countType("oc:cable")
 print("  线缆存在: " .. (nCable > 0 and "是" or "无法判断（线缆不注册组件）"))
+
+-- 6. 数据球仓内容扫描（inventory_controller）
+print("-- 6. 数据球仓内容（需球仓贴 inventory_controller 适配器）--")
+local nInv = countType("inventory_controller")
+if nInv == 0 then
+  print("  无 inventory_controller —— 给球仓适配器加物品栏控制器升级后可扫描")
+else
+  local okN, nbt = pcall(dofile, "/home/ere/nbt.lua")
+  for addr, _ in component.list("inventory_controller") do
+    local p = component.proxy(addr)
+    for side = 0, 5 do
+      local oks, sz = pcall(p.getInventorySize, side)
+      if oks and type(sz) == "number" and sz > 1 then
+        print(string.format("  invc %s side=%d:", addr:sub(1, 8), side))
+        for slot = 1, sz do
+          local ok, it = pcall(p.getStackInSlot, side, slot)
+          if ok and it then
+            local desc = tostring(it.label)
+            if it.damage == 32707 and it.hasTag and it.tag and okN then
+              local okp, data = pcall(nbt.fromGzip, it.tag)
+              if okp and data.mDataName then
+                desc = desc .. " → 元素 " .. tostring(data.mDataName)
+              end
+            end
+            print(string.format("    [%2d] %s", slot, desc))
+          end
+        end
+        break
+      end
+    end
+  end
+end
 print()
 print("判读速查：")
 print("  ① 第 1 节空 → 电脑没入网（检查机箱供电/线缆）")

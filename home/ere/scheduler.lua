@@ -143,15 +143,20 @@ function scheduler:tick(nowUptime, uumStats, me)
         goto continue
       end
       -- 认领新目标
+      -- 球仓能力表（有扫描数据时）：只能认领本机可产的元素
+      local caps = self.model.caps and self.model.caps[m.addr]
+      local capsActive = caps and next(caps) ~= nil
       local picked = nil
       for _, c in ipairs(cands) do
         local s = c.slot
-        local cnt = assigned[elemKey(s)] or 0
-        -- 独占保护：可产目标≥2 时，同元素占用机器数不得超过半数（向上取整）
-        local limit = self:_soloLimit(#machines, #cands)
-        if cnt < limit then
-          picked = s
-          break
+        if not (capsActive and caps[s.id] == nil) then
+          local cnt = assigned[elemKey(s)] or 0
+          -- 独占保护：可产目标≥2 时，同元素占用机器数不得超过半数（向上取整）
+          local limit = self:_soloLimit(#machines, #cands)
+          if cnt < limit then
+            picked = s
+            break
+          end
         end
       end
       if picked then
@@ -159,8 +164,9 @@ function scheduler:tick(nowUptime, uumStats, me)
         m.targetSlot = picked.id
         m.since = nowUptime
         picked.supplier = m.addr
-        -- 电路号 = 该槽在请求器中的槽号（数据球仓槽位映射约定：槽 N ↔ 电路 N）
-        local circuit = picked.slot
+        -- 电路号：优先取该元素在本机球仓的实际槽位（扫描数据）；
+        -- 无扫描数据回落约定（请求器槽 N ↔ 电路 N）
+        local circuit = (capsActive and caps[picked.id]) or picked.slot
         if circuit >= self.cfg.circuitMin and circuit <= self.cfg.circuitMax then
           local cur = self:_readCircuit(m)
           if cur ~= circuit then

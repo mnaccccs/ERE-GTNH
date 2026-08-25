@@ -365,7 +365,21 @@ function ui.drawOps(app)
       local xb = 2 + util.wlen(ctx) - 8
       addHitbox("actions", xb, L.rowOpsCtx, 8, 1, "unpin", nil)
     else
-      ctx = string.format(" 机器#%s · 自动 · [固定当前电路%02d]", tostring(app.machIndexByAddr[selM.addr]), selM.curcircuit or -1)
+      -- 可产元素列表（球仓扫描能力表）
+      local capTxt = ""
+      local caps = app.caps and app.caps[selM.addr]
+      if caps then
+        local list = {}
+        for slotId, circuit in pairs(caps) do
+          local s = app.slots[slotId]
+          list[#list + 1] = { c = circuit, label = s and util.truncate(s.label or s.name, 2) or "?" }
+        end
+        table.sort(list, function(a, b) return a.c < b.c end)
+        local parts = {}
+        for _, e in ipairs(list) do parts[#parts + 1] = e.label end
+        if #parts > 0 then capTxt = "可产:" .. table.concat(parts, "/") .. " · " end
+      end
+      ctx = string.format(" 机器#%s · 自动 · %s[固定当前电路%02d]", tostring(app.machIndexByAddr[selM.addr]), capTxt, selM.curcircuit or -1)
       drawText(2, L.rowOpsCtx, ctx, C.fg)
       local xb = 2 + util.wlen(ctx) - 12
       addHitbox("actions", xb, L.rowOpsCtx, 12, 1, "pinCur", nil)

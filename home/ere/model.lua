@@ -146,6 +146,63 @@ function model:machineList()
   return list
 end
 
+-- ==================== 球仓扫描：元素绑定 + 机器能力表 ====================
+
+--- 学习元素符号 ↔ 目标槽的绑定，并生成每台机器的能力表。
+--- 学习假设（约定）：请求器槽 N 的元素 ↔ 球仓槽 N 的数据球。
+---   同一槽位上所有机器的球符号一致（unanimous）才采纳，冲突位置跳过；
+---   config.orbElements 的手动绑定（label 子串）最后覆盖兜底。
+--- @param orbLayouts table  { orbAddr = { [槽位]=元素符号 } }
+--- @return bindings table  { 符号 = slot }；副作用：self.caps[orbAddr][slotId] = 电路号
+function model:learnOrbBindings(orbLayouts)
+  -- 1) 位置一致投票
+  local votes = {}   -- pos → symbol | false（冲突）
+  for _, layout in pairs(orbLayouts or {}) do
+    for pos, sym in pairs(layout) do
+      if votes[pos] == nil then votes[pos] = sym
+      elseif votes[pos] ~= sym then votes[pos] = false end
+    end
+  end
+  -- 2) 绑定到同槽位目标槽
+  local bindings = {}
+  for pos, sym in pairs(votes) do
+    if sym then
+      for _, s in pairs(self.slots) do
+        if s.slot == pos then bindings[sym] = s break end
+      end
+    end
+  end
+  -- 3) 手动绑定兜底：符号 → label 子串匹配
+  for sym, pat in pairs(self.cfg.orbElements or {}) do
+    if bindings[sym] == nil then
+      for _, s in pairs(self.slots) do
+        if tostring(s.label or ""):find(tostring(pat), 1, true) then
+          bindings[sym] = s
+          break
+        end
+      end
+    end
+  end
+  self.orbBindings = bindings
+  -- 4) 能力表：元素在「这台」机器球仓里的实际槽位 = 电路号
+  self.caps = {}
+  for orbAddr, layout in pairs(orbLayouts or {}) do
+    local c = {}
+    for pos, sym in pairs(layout) do
+      local s = bindings[sym]
+      if s then c[s.id] = pos end
+    end
+    self.caps[orbAddr] = c
+  end
+  return bindings
+end
+
+--- 清掉球仓扫描数据（无 invc 时回落纯约定模式）
+function model:clearOrbScan()
+  self.orbBindings = nil
+  self.caps = nil
+end
+
 --- 槽名缩写（UI 显示用）：label 去命名空间取尾巴
 function model.slotShortLabel(slot)
   local l = slot.label or slot.name or "?"
