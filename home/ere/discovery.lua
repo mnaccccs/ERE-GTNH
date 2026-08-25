@@ -97,6 +97,20 @@ function discovery.scan(addrFilter)
     end
   end
 
+  -- 同一物理球仓被多个适配器重复暴露（直连 + MFU 并存）→ 按坐标去重
+  local coordSeen = {}
+  local dedup = {}
+  for _, p in ipairs(out.orbs) do
+    local key = p.address
+    local okc, x, y, z = pcall(p.getCoordinates)
+    if okc and x then key = table.concat({ x, y, z }, ",") end
+    if not coordSeen[key] then
+      coordSeen[key] = true
+      dedup[#dedup + 1] = p
+    end
+  end
+  out.orbs = dedup
+
   table.sort(out.maintainers, function(a, b) return a.address < b.address end)
   table.sort(out.orbs, function(a, b) return a.address < b.address end)
   return out
