@@ -250,6 +250,57 @@ T("scheduler 分配与独占保护", function()
   assert(type(evs3) == "table")
 end)
 
+T("scheduler 同名粉独占保护（gt.metaitem.01 撞车回归）", function()
+  -- 回归：GT 粉类注册名全是 gregtech:gt.metaitem.01（仅 damage 不同），
+  -- 独占保护若按注册名计数，2 台机上粉后所有粉都被挡 → 其余机器空转
+  local config = require("config")
+  local util = require("util")
+  local modelM = require("model")
+  local schedM = require("scheduler")
+
+  local log = util.newLog(50)
+  local mdl = modelM.new(config, log)
+  local sched = schedM.new(config, mdl, log)
+
+  -- 打桩电路读写（不进 mock 组件体系）
+  local circuits = {}
+  sched.discovery = {
+    readCircuit = function(p) return circuits[p.address] or -1 end,
+    writeCircuit = function(p, c) circuits[p.address] = c return true end,
+  }
+
+  -- 4 台球仓
+  local orbs = {}
+  for i = 1, 4 do orbs[#orbs + 1] = { address = "orb" .. i } end
+  mdl:setMachines(orbs)
+
+  -- 4 个同名 dust 槽（仅 damage 不同），全部缺货
+  local defs = {
+    { id = "m:1", slot = 1, damage = 2083, label = "锇粉" },
+    { id = "m:2", slot = 2, damage = 2329, label = "三钛粉" },
+    { id = "m:3", slot = 3, damage = 2984, label = "镅粉" },
+    { id = "m:4", slot = 4, damage = 2103, label = "?粉" },
+  }
+  for _, d in ipairs(defs) do
+    mdl.slots[d.id] = {
+      id = d.id, maintainerAddr = "m", slot = d.slot,
+      name = "gregtech:gt.metaitem.01", damage = d.damage, label = d.label,
+      quantity = 1000, batch = 100, weight = 3, disabled = false, cur = 0,
+    }
+  end
+
+  sched:tick(1000, nil, nil)
+  -- 独占上限 ceil(4/2)=2：每元素最多 2 台；4 台机器必须全部领到任务
+  local cnt = {}
+  for _, m in ipairs(mdl:machineList()) do
+    assert(m.targetSlot ~= nil, "同名粉不应互相挤占：" .. m.addr .. " 空闲")
+    cnt[m.targetSlot] = (cnt[m.targetSlot] or 0) + 1
+  end
+  for id, n in pairs(cnt) do
+    assert(n <= 2, id .. " 超过独占上限: " .. n)
+  end
+end)
+
 T("scheduler UUM 保口粮", function()
   local config = require("config")
   local util = require("util")

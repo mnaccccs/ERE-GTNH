@@ -25,6 +25,14 @@ end
 
 -- ==================== 评分 ====================
 
+--- 元素唯一键：GT 粉类全是 gregtech:gt.metaitem.01（仅 damage 不同）、
+--- 液滴全是 ae2fc:fluid_drop（仅 fluid.name 不同），独占保护计数必须按
+--- 元素区分，不能按注册名——否则一台机上粉后所有粉都被误判"满员"
+local function elemKey(s)
+  if s.isFluid and s.fluid and s.fluid.name then return "F:" .. s.fluid.name end
+  return "I:" .. tostring(s.name) .. ":" .. tostring(s.damage or 0)
+end
+
 --- 单槽得分。达标（含磁滞）返回 0
 function scheduler:score(slot)
   local hyst = self.cfg.switchHysteresis or 0.90
@@ -73,12 +81,12 @@ function scheduler:tick(nowUptime, uumStats, me)
   end
 
   -- 3. 逐台机器决策
-  local assigned = {}   -- slotName -> count（独占保护计数）
+  local assigned = {}   -- elemKey -> count（独占保护计数，按元素不按注册名）
   -- 先统计既有在产（固定模式不算）
   for _, m in ipairs(machines) do
     if m.mode ~= "pinned" and m.targetSlot then
       local s = self.model.slots[m.targetSlot]
-      if s then assigned[s.name] = (assigned[s.name] or 0) + 1 end
+      if s then assigned[elemKey(s)] = (assigned[elemKey(s)] or 0) + 1 end
     end
   end
 
@@ -138,7 +146,7 @@ function scheduler:tick(nowUptime, uumStats, me)
       local picked = nil
       for _, c in ipairs(cands) do
         local s = c.slot
-        local cnt = assigned[s.name] or 0
+        local cnt = assigned[elemKey(s)] or 0
         -- 独占保护：可产目标≥2 时，同元素占用机器数不得超过半数（向上取整）
         local limit = self:_soloLimit(#machines, #cands)
         if cnt < limit then
@@ -147,7 +155,7 @@ function scheduler:tick(nowUptime, uumStats, me)
         end
       end
       if picked then
-        assigned[picked.name] = (assigned[picked.name] or 0) + 1
+        assigned[elemKey(picked)] = (assigned[elemKey(picked)] or 0) + 1
         m.targetSlot = picked.id
         m.since = nowUptime
         picked.supplier = m.addr
